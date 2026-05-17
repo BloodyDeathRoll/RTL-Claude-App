@@ -1,0 +1,21 @@
+# Node
+node_modules/
+npm-debug.log
+package-lock.json
+
+# Patcher build artifacts
+patcher/dist/
+patcher/.cache/
+
+# Installer build artifacts
+installer/windows/Output/
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Inno Setup intermediate
+*.iss.bak

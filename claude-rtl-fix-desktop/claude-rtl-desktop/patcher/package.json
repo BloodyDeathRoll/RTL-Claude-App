@@ -1,0 +1,22 @@
+{
+  "name": "claude-rtl-fix-desktop",
+  "version": "0.1.0",
+  "description": "Patches Claude desktop app to fix RTL text rendering.",
+  "main": "src/patch.js",
+  "bin": {
+    "claude-rtl-patch": "src/patch.js"
+  },
+  "scripts": {
+    "patch": "node src/patch.js",
+    "unpatch": "node src/patch.js --unpatch"
+  },
+  "dependencies": {
+    "@electron/asar": "^4.2.0",
+    "@electron/fuses": "^2.1.1"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "postject": "^1.0.0-alpha.6"
+  }
+}
