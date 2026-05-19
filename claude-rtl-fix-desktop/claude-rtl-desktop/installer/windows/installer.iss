@@ -18,7 +18,7 @@
 
 #define MyAppName       "Claude RTL Fix"
 #define MyAppShortName  "ClaudeRTLFix"
-#define MyAppVersion    "0.1.4"
+#define MyAppVersion    "0.1.5"
 #define MyAppPublisher  "Claude RTL Fix"
 #define MyAppURL        "https://github.com/BloodyDeathRoll/RTL-Claude-App"
 
@@ -64,8 +64,10 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
     Flags: runhidden waituntilterminated
 
 ; Initial patch of whatever Claude version is currently installed.
+; --quiet suppresses interactive prompts (AV warning is already shown above
+; as a dialog by NextButtonClick) and logs to C:\ProgramData\ClaudeRTLFix\log.txt.
 Filename: "{app}\claude-rtl-patch.exe"; \
-    Parameters: ""; \
+    Parameters: "--quiet"; \
     StatusMsg: "Patching current Claude install..."; \
     Flags: runhidden waituntilterminated
 

@@ -352,7 +352,7 @@ async function main() {
 
   // Warn about third-party AV when running interactively (not the watcher).
   // The installer handles this via its own dialog; here we cover direct .exe runs.
-  if (!unpatch && !quiet && process.stdout.isTTY) {
+  if (!unpatch && !quiet && process.stdin.isTTY && process.stdout.isTTY) {
     const avList = detectThirdPartyAv();
     if (avList.length > 0) {
       console.warn(
