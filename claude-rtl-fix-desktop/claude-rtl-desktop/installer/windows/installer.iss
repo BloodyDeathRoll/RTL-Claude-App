@@ -18,9 +18,9 @@
 
 #define MyAppName       "Claude RTL Fix"
 #define MyAppShortName  "ClaudeRTLFix"
-#define MyAppVersion    "0.1.0"
+#define MyAppVersion    "0.1.4"
 #define MyAppPublisher  "Claude RTL Fix"
-#define MyAppURL        "https://github.com/your-fork/claude-rtl-fix-desktop"
+#define MyAppURL        "https://github.com/BloodyDeathRoll/RTL-Claude-App"
 
 [Setup]
 AppId={{B7E8AC4F-9F66-4F2A-9F12-7C9B17A0EF11}
@@ -92,6 +92,23 @@ Filename: "{app}\claude-rtl-patch.exe"; \
 Type: filesandordirs; Name: "{commonappdata}\{#MyAppShortName}"
 
 [Code]
+// Before copying files, stop the watcher task and kill any running patcher
+// process so the installer can overwrite claude-rtl-patch.exe (which the
+// watcher may be holding open from a previous install).
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssInstall then begin
+    Exec(ExpandConstant('{sys}\schtasks.exe'),
+         '/End /TN "\ClaudeRTLFix\Watcher"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\taskkill.exe'),
+         '/F /IM claude-rtl-patch.exe',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   ResultCode: Integer;
