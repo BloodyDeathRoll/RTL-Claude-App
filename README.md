@@ -36,6 +36,10 @@ If you miss this step and your AV quarantines something:
 
 > **Why isn't the exe signed?** Code-signing certificates cost $200–600/year. This is a free open-source tool. We plan to apply for a free certificate through [SignPath Foundation](https://signpath.org/free-code-signing) once the tool has been stable for a while. In the meantime, Windows SmartScreen will show a "Windows protected your PC" warning on first run - click "More info" → "Run anyway".
 
+### Looking for the browser extension?
+
+If you use Claude in a browser rather than the desktop app, the browser extension version of this fix is available at [github.com/BloodyDeathRoll/RTL-Claude](https://github.com/BloodyDeathRoll/RTL-Claude). It works without any installation or system modifications - just install the extension and RTL text is fixed in Claude's web interface.
+
 ---
 
 ## What it actually does
