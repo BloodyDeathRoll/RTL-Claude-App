@@ -6,6 +6,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const asar = require('@electron/asar');
 const { ensureIntegrityDisabled, resolveElectronBinary } = require('./integrity');
 
@@ -29,7 +30,6 @@ function findMsixInstall() {
   // Anthropic ships Claude as an MSIX package now (publisher hash
   // pzs8sxrjxfjjc). Ask Windows where it is rather than guessing paths.
   try {
-    const { execFileSync } = require('child_process');
     const out = execFileSync(
       'powershell.exe',
       [
@@ -95,6 +95,66 @@ function isMsixInstall(resources) {
     /\\WindowsApps\\Claude[^\\]*\\app\\resources$/i.test(resources);
 }
 
+// Kill Claude so its process releases the lock on Claude.exe before we flip
+// the fuse. Returns after a brief wait for the OS to release file handles.
+async function killClaude() {
+  if (process.platform !== 'win32') return;
+  try {
+    execFileSync('taskkill', ['/F', '/IM', 'Claude.exe', '/T'],
+      { stdio: 'pipe', windowsHide: true });
+    await new Promise((r) => setTimeout(r, 1500));
+  } catch (_) { /* not running — that's fine */ }
+}
+
+// Adds a Windows Defender exclusion for the given directory so the fuse-flip
+// in Claude.exe isn't quarantined mid-write. Non-fatal: Defender may not be
+// present (third-party AV, or a policy that blocks Add-MpPreference).
+function addDefenderExclusion(dirPath) {
+  if (process.platform !== 'win32') return;
+  try {
+    execFileSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `Add-MpPreference -ExclusionPath '${dirPath}'`,
+    ], { stdio: 'pipe', windowsHide: true });
+  } catch (_) { /* non-fatal */ }
+}
+
+// Returns display names of non-Defender AV products visible to SecurityCenter2.
+// Returns [] if the query fails (old Windows, WMI unavailable, etc.).
+function detectThirdPartyAv() {
+  if (process.platform !== 'win32') return [];
+  try {
+    const out = execFileSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      'Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct |' +
+      ' Where-Object { $_.displayName -notmatch "Defender" } |' +
+      ' Select-Object -ExpandProperty displayName',
+    ], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    return out.split('\n').map((s) => s.trim()).filter(Boolean);
+  } catch (_) { return []; }
+}
+
+// Build a micromatch glob for files that live in app.asar.unpacked (native
+// modules etc.). These cannot be loaded from inside a packed asar, so they
+// must stay unpacked when we repack. We derive the list from the existing
+// .unpacked directory rather than parsing the asar header.
+function buildUnpackGlob(asarPath) {
+  const unpackedDir = asarPath + '.unpacked';
+  if (!fs.existsSync(unpackedDir)) return null;
+  const files = [];
+  function walk(dir, rel) {
+    for (const name of fs.readdirSync(dir)) {
+      const full = path.join(dir, name);
+      const relPath = rel ? rel + '/' + name : name;
+      if (fs.statSync(full).isDirectory()) walk(full, relPath);
+      else files.push(relPath);
+    }
+  }
+  walk(unpackedDir, '');
+  if (!files.length) return null;
+  return files.length === 1 ? files[0] : '{' + files.join(',') + '}';
+}
+
 function findClaude(explicit) {
   const candidates = explicit ? [explicit] : defaultClaudePaths();
   for (const dir of candidates) {
@@ -110,9 +170,11 @@ function findClaude(explicit) {
 
 // ----- patching -----------------------------------------------------------
 
-const RTL_ENTRY = 'rtl-fix-entry.js';
-const RTL_HOOK = 'rtl-fix-hook.js';
+const RTL_ENTRY   = 'rtl-fix-entry.js';
+const RTL_HOOK    = 'rtl-fix-hook.js';
 const RTL_PAYLOAD = 'rtl-fix-payload.js';
+// Key stored in package.json that holds the original "main" value. Its
+// presence also serves as the "already patched" marker.
 const ORIG_MAIN_KEY = '__rtlFixOriginalMain';
 
 function patchUnpackedTree(unpackedDir) {
@@ -121,41 +183,15 @@ function patchUnpackedTree(unpackedDir) {
     throw new Error('No package.json inside app.asar — unexpected structure.');
   }
   const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+  const originalMain = pkg.main || 'index.js';
 
-  const currentMain = pkg.main || 'index.js';
-  const alreadyPatched = currentMain === RTL_ENTRY && pkg[ORIG_MAIN_KEY];
-
-  // Resolve where the original main actually lives. Electron resolves "main"
-  // relative to package.json with normal node resolution; cover the common case.
-  const originalMain = alreadyPatched ? pkg[ORIG_MAIN_KEY] : currentMain;
-
-  // Sanity-check original main exists
-  const probePaths = [
-    path.join(unpackedDir, originalMain),
-    path.join(unpackedDir, originalMain + '.js'),
-    path.join(unpackedDir, originalMain, 'index.js'),
-  ];
-  if (!probePaths.some((p) => fs.existsSync(p))) {
-    throw new Error(
-      `Original main "${originalMain}" not found inside asar. ` +
-        `Refusing to patch. Resolved candidates:\n  ` + probePaths.join('\n  ')
-    );
-  }
-
-  // Write our payload + hook into the app root.
-  // Sources come from the embedded module so the patcher works both as a
-  // source checkout and as a bundled single-file binary.
-  fs.writeFileSync(path.join(unpackedDir, RTL_PAYLOAD), embedded.RTL_FIX_PAYLOAD_SOURCE);
+  // Write our three payload files to the asar root.
+  fs.writeFileSync(path.join(unpackedDir, RTL_ENTRY),   embedded.RTL_FIX_ENTRY_SOURCE);
   fs.writeFileSync(path.join(unpackedDir, RTL_HOOK),    embedded.RTL_FIX_HOOK_SOURCE);
+  fs.writeFileSync(path.join(unpackedDir, RTL_PAYLOAD), embedded.RTL_FIX_PAYLOAD_SOURCE);
 
-  // Write the entry shim
-  const entryContent =
-    '// Injected by claude-rtl-fix. Do not edit.\n' +
-    "try { require('./" + RTL_HOOK + "'); } catch (e) { console.error('[claude-rtl-fix]', e); }\n" +
-    'module.exports = require(' + JSON.stringify('./' + originalMain) + ');\n';
-  fs.writeFileSync(path.join(unpackedDir, RTL_ENTRY), entryContent);
-
-  // Update package.json (idempotent)
+  // Redirect main → our entry shim, and save the original so we can restore.
+  // We never touch Claude's own JS files, so its internal integrity checks pass.
   pkg[ORIG_MAIN_KEY] = originalMain;
   pkg.main = RTL_ENTRY;
   fs.writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2));
@@ -166,16 +202,19 @@ function patchUnpackedTree(unpackedDir) {
 function unpatchUnpackedTree(unpackedDir) {
   const pkgJsonPath = path.join(unpackedDir, 'package.json');
   const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-  if (!pkg[ORIG_MAIN_KEY]) {
-    return { changed: false };
-  }
+  if (!pkg[ORIG_MAIN_KEY]) return { changed: false };
+
+  // Restore the original main entry.
   pkg.main = pkg[ORIG_MAIN_KEY];
   delete pkg[ORIG_MAIN_KEY];
   fs.writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2));
+
+  // Remove our injected files.
   for (const f of [RTL_ENTRY, RTL_HOOK, RTL_PAYLOAD]) {
     const p = path.join(unpackedDir, f);
     if (fs.existsSync(p)) fs.unlinkSync(p);
   }
+
   return { changed: true };
 }
 
@@ -194,7 +233,7 @@ function readPkgJsonFromAsar(asarPath) {
 
 function alreadyPatched(asarPath) {
   const pkg = readPkgJsonFromAsar(asarPath);
-  return !!(pkg && pkg.main === RTL_ENTRY && pkg[ORIG_MAIN_KEY]);
+  return !!(pkg && pkg[ORIG_MAIN_KEY]);
 }
 
 function backupPath(asarPath, isMsix) {
@@ -257,6 +296,7 @@ async function main() {
   const args = process.argv.slice(2);
   const unpatch = args.includes('--unpatch');
   const quiet = args.includes('--quiet');
+  const noFuseFlip = args.includes('--no-fuse-flip');
   const ci = args.indexOf('--claude-path');
   const explicit = ci >= 0 ? args[ci + 1] : null;
 
@@ -279,15 +319,54 @@ async function main() {
     return;
   }
 
-  // Pre-flight: confirm we can also locate the Electron binary.
+  // Locate the Electron binary (logged for diagnostics; only needed if fuse
+  // flip is ever required in future).
   let binaryPath = null;
-  if (!unpatch) {
-    try {
-      const r = resolveElectronBinary(resources);
-      binaryPath = r.binary;
-      log(quiet, '[claude-rtl-fix] electron binary:', binaryPath);
-    } catch (e) {
-      throw new Error('pre-flight failed: ' + e.message);
+  try {
+    const r = resolveElectronBinary(resources);
+    binaryPath = r.binary;
+    log(quiet, '[claude-rtl-fix] electron binary:', binaryPath);
+  } catch (_) { /* non-fatal — we no longer modify the binary */ }
+
+  // --unpatch: if we have the original backup, restore it directly — no repack
+  // needed and no risk of structural changes to the asar.
+  if (unpatch) {
+    const backup = backupPath(asarPath, isMsix);
+    if (fs.existsSync(backup)) {
+      log(quiet, '[claude-rtl-fix] restoring from backup:', backup);
+      async function restoreFromBackup() {
+        fs.copyFileSync(backup, asarPath);
+        log(quiet, '[claude-rtl-fix] restored original asar.');
+      }
+      if (isMsix && ACL) {
+        ACL.takeOwnership(asarPath);
+        try { await restoreFromBackup(); }
+        finally { ACL.restoreOwnership(asarPath); }
+      } else {
+        await restoreFromBackup();
+      }
+      return;
+    }
+    log(quiet, '[claude-rtl-fix] no backup found, falling back to repack-based unpatch.');
+  }
+
+  // Warn about third-party AV when running interactively (not the watcher).
+  // The installer handles this via its own dialog; here we cover direct .exe runs.
+  if (!unpatch && !quiet && process.stdout.isTTY) {
+    const avList = detectThirdPartyAv();
+    if (avList.length > 0) {
+      console.warn(
+        '\nWARNING: Third-party antivirus detected: ' + avList.join(', ') + '\n' +
+        'Your antivirus may quarantine Claude.exe during patching, which will\n' +
+        'prevent Claude from launching.\n\n' +
+        'Before continuing, add an exclusion for:\n' +
+        '  C:\\Program Files\\WindowsApps\n\n' +
+        'Press Enter once the exclusion is added, or Ctrl+C to cancel.'
+      );
+      await new Promise((resolve) => {
+        const rl = require('readline').createInterface({ input: process.stdin });
+        rl.question('', () => { rl.close(); resolve(); });
+      });
     }
   }
 
@@ -316,13 +395,37 @@ async function main() {
       fs.copyFileSync(asarPath, backup);
       log(quiet, '[claude-rtl-fix] backed up original asar →', backup);
     }
-    await asar.createPackage(unpacked, asarPath);
-    log(quiet, '[claude-rtl-fix] repacked', asarPath);
+    const unpackGlob = buildUnpackGlob(asarPath);
+    if (unpackGlob) {
+      await asar.createPackageWithOptions(unpacked, asarPath, { unpack: unpackGlob });
+      log(quiet, '[claude-rtl-fix] repacked', asarPath, '(preserved unpacked:', unpackGlob + ')');
+    } else {
+      await asar.createPackage(unpacked, asarPath);
+      log(quiet, '[claude-rtl-fix] repacked', asarPath);
+    }
 
     if (!unpatch) {
-      const r = await ensureIntegrityDisabled(resources, { verbose: !quiet });
-      if (r.changed) log(quiet, '[claude-rtl-fix] integrity bypass applied.');
-      else log(quiet, '[claude-rtl-fix] integrity bypass not needed (' + r.reason + ').');
+      if (isMsix) addDefenderExclusion('C:\\Program Files\\WindowsApps');
+      if (noFuseFlip) {
+        log(quiet, '[claude-rtl-fix] skipping fuse flip (--no-fuse-flip).');
+      } else {
+        // Kill Claude to release its lock on Claude.exe before the fuse flip.
+        await killClaude();
+        // Retry on EBUSY — the OS may hold the file handle briefly after kill.
+        let r;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            r = await ensureIntegrityDisabled(resources, { verbose: !quiet });
+            break;
+          } catch (e) {
+            if (e.code !== 'EBUSY' || attempt === 3) throw e;
+            log(quiet, '[claude-rtl-fix] Claude.exe busy, retrying fuse flip...');
+            await new Promise((res) => setTimeout(res, 1000 * (attempt + 1)));
+          }
+        }
+        if (r.changed) log(quiet, '[claude-rtl-fix] integrity bypass applied.');
+        else log(quiet, '[claude-rtl-fix] integrity bypass not needed (' + r.reason + ').');
+      }
     }
   }
 
@@ -349,6 +452,30 @@ async function main() {
   }
 
   log(quiet, '[claude-rtl-fix] done.');
+
+  // After a successful patch (not unpatch, not watcher), relaunch Claude so
+  // the user can immediately see the fix without a manual restart.
+  if (!unpatch && !quiet) {
+    launchClaude(isMsix, binaryPath);
+  }
+}
+
+function launchClaude(isMsix, binaryPath) {
+  if (process.platform !== 'win32') return;
+  const { spawn } = require('child_process');
+  try {
+    if (isMsix) {
+      const familyName = execFileSync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        '(Get-AppxPackage -Name Claude | Sort-Object Version -Descending | Select-Object -First 1).PackageFamilyName',
+      ], { encoding: 'utf8', windowsHide: true }).trim();
+      if (!familyName) return;
+      spawn('explorer.exe', [`shell:AppsFolder\\${familyName}!Claude`],
+        { detached: true, stdio: 'ignore' }).unref();
+    } else if (binaryPath) {
+      spawn(binaryPath, [], { detached: true, stdio: 'ignore' }).unref();
+    }
+  } catch (_) { /* non-fatal */ }
 }
 
 main().catch((e) => {

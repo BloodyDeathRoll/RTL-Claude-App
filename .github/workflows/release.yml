@@ -1,0 +1,41 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Inno Setup 6
+        run: choco install innosetup --version=6.2.2 -y --no-progress
+        shell: cmd
+
+      - name: Build installer
+        working-directory: claude-rtl-fix-desktop/claude-rtl-desktop
+        run: build-all.cmd
+        shell: cmd
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClaudeRTLFix-Setup
+          path: claude-rtl-fix-desktop/claude-rtl-desktop/installer/windows/Output/ClaudeRTLFix-Setup.exe
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: claude-rtl-fix-desktop/claude-rtl-desktop/installer/windows/Output/ClaudeRTLFix-Setup.exe
+          generate_release_notes: true

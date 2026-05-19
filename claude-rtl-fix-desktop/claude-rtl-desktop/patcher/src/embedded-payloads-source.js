@@ -9,6 +9,7 @@ const path = require('path');
 const PAYLOAD_DIR = path.join(__dirname, 'payload');
 
 module.exports = {
-  RTL_FIX_HOOK_SOURCE:    fs.readFileSync(path.join(PAYLOAD_DIR, 'rtl-fix-hook.js'), 'utf8'),
+  RTL_FIX_ENTRY_SOURCE:   fs.readFileSync(path.join(PAYLOAD_DIR, 'rtl-fix-entry.js'),   'utf8'),
+  RTL_FIX_HOOK_SOURCE:    fs.readFileSync(path.join(PAYLOAD_DIR, 'rtl-fix-hook.js'),    'utf8'),
   RTL_FIX_PAYLOAD_SOURCE: fs.readFileSync(path.join(PAYLOAD_DIR, 'rtl-fix-payload.js'), 'utf8'),
 };

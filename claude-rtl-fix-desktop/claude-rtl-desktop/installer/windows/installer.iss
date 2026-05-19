@@ -55,6 +55,14 @@ Source: "README.txt";                             DestDir: "{app}"; Flags: ignor
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]
+; Add a Windows Defender exclusion for WindowsApps so the fuse-flip in
+; Claude.exe isn't quarantined mid-write. Runs as admin (installer already
+; elevated). Non-fatal: PowerShell exits non-zero if Defender isn't active.
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
+    Parameters: "-NoProfile -NonInteractive -Command ""Add-MpPreference -ExclusionPath 'C:\Program Files\WindowsApps','C:\Program Files\ClaudeRTLFix'"""; \
+    StatusMsg: "Configuring security exclusions..."; \
+    Flags: runhidden waituntilterminated
+
 ; Initial patch of whatever Claude version is currently installed.
 Filename: "{app}\claude-rtl-patch.exe"; \
     Parameters: ""; \
@@ -107,6 +115,30 @@ begin
         'Continue anyway?',
         mbConfirmation, MB_YESNO) = IDNO then
         Result := False;
+    end;
+
+    // Warn if a third-party AV is present. The installer adds a Defender
+    // exclusion automatically, but it cannot do the same for Avast, Norton,
+    // Bitdefender, etc. Ask the user to add the exclusion manually before
+    // the patcher runs, so Claude.exe isn't quarantined mid-write.
+    if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+            '-NoProfile -NonInteractive -Command ' +
+            '"$n = (Get-CimInstance -Namespace root/SecurityCenter2 ' +
+            '-ClassName AntiVirusProduct | ' +
+            'Where-Object { $_.displayName -notmatch ''Defender'' } | ' +
+            'Measure-Object).Count; if ($n -gt 0) { exit 1 } else { exit 0 }"',
+            '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
+      if ResultCode = 1 then
+        MsgBox(
+          'Third-party antivirus detected.' #13#10 #13#10 +
+          'The installer will add a Windows Defender exclusion automatically, ' +
+          'but your third-party antivirus also needs an exclusion for:' #13#10 #13#10 +
+          '    C:\Program Files\WindowsApps' #13#10 #13#10 +
+          'Without it, your antivirus may quarantine Claude.exe during patching, ' +
+          'which will prevent Claude from launching.' #13#10 #13#10 +
+          'Please add the exclusion in your antivirus settings now, ' +
+          'then click OK to continue with the installation.',
+          mbInformation, MB_OK);
     end;
   end;
 end;

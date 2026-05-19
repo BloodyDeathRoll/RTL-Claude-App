@@ -1,0 +1,4 @@
+node_modules/
+claude-rtl-fix-desktop/claude-rtl-desktop/patcher/dist/
+claude-rtl-fix-desktop/claude-rtl-desktop/installer/windows/Output/
+*.zip

@@ -14,6 +14,28 @@ The patch is applied immediately, and a background task re-applies it within 30 
 
 To remove: Settings → Apps → Claude RTL Fix → Uninstall. This restores Claude's original `app.asar` and removes the background task.
 
+### Antivirus notice
+
+**You may need to add antivirus exclusions before or during installation.**
+
+This tool modifies files inside `C:\Program Files\WindowsApps\` — a protected system directory where Claude's MSIX package lives. It also modifies `Claude.exe` to disable an Electron integrity check. These are legitimate operations, but they look identical to what malware patchers do. Some antivirus products will quarantine the patcher or the modified files.
+
+**Windows Defender** is handled automatically: the installer adds exclusions for `C:\Program Files\WindowsApps` and `C:\Program Files\ClaudeRTLFix` before running the patcher, so Defender should not interfere.
+
+**Third-party antivirus (Avast, Norton, Bitdefender, Kaspersky, etc.):** The installer will warn you if it detects a third-party AV product. Before clicking OK on that dialog, add these two folders as exclusions in your antivirus settings:
+
+```
+C:\Program Files\WindowsApps
+C:\Program Files\ClaudeRTLFix
+```
+
+If you miss this step and your AV quarantines something:
+1. Restore the quarantined files from your AV's quarantine vault.
+2. Add the exclusions above.
+3. Run `claude-rtl-patch.exe --unpatch` then `claude-rtl-patch.exe` again to re-apply cleanly.
+
+> **Why isn't the exe signed?** Code-signing certificates cost $200–600/year. This is a free open-source tool. We plan to apply for a free certificate through [SignPath Foundation](https://signpath.org/free-code-signing) once the tool has been stable for a while. In the meantime, Windows SmartScreen will show a "Windows protected your PC" warning on first run — click "More info" → "Run anyway".
+
 ---
 
 ## What it actually does
@@ -60,18 +82,13 @@ We don't try to splice our code into Claude's bundled JS — that would break ev
 2. We rewrite the asar's `package.json` so its `main` field points at our `rtl-fix-entry.js` instead of Claude's original main.
 3. `rtl-fix-entry.js` does two things: `require("./rtl-fix-hook.js")` first, then `require("./<original_main>")`. So Claude's main code runs as it always did, just preceded by our hook.
 
-The hook runs in the **main process**. It registers a listener:
+The hook runs in the **main process**. It uses two complementary mechanisms:
 
-```js
-app.on('web-contents-created', (_event, webContents) => {
-  const inject = () => webContents.executeJavaScript(RTL_FIX_PAYLOAD).catch(() => {});
-  webContents.on('did-finish-load', inject);
-  webContents.on('did-navigate', inject);
-  webContents.on('did-navigate-in-page', inject);
-});
-```
+**1. CSS injection via `webContents.insertCSS()`** — sets `unicode-bidi: plaintext` on every text block (equivalent to `dir="auto"`) and forces `direction: ltr` on code blocks. CSS rules apply automatically to elements added later by React, so no observer is needed for text direction.
 
-Every renderer that Claude creates gets the payload injected on every load and navigation. The payload is the same logic as the browser extension's `content.js`: set `dir="auto"` on text blocks, force `dir="ltr"` on code, install a `MutationObserver` for streaming tokens.
+**2. `dir="auto"` on list containers via `webContents.executeJavaScriptInIsolatedWorld()`** — `unicode-bidi: plaintext` in CSS cannot move list markers (numbers/bullets) to the correct side for RTL lists because CSS cannot scan block children to detect direction. Setting `dir="auto"` as an HTML attribute on `ol`/`ul` elements does. A `MutationObserver` running in isolated world 999 catches list elements as React adds them.
+
+The isolated world is important: `executeJavaScript` (world 0) runs in Claude's renderer context and can interfere with React's update cycle. World 999 shares the DOM but is invisible to Claude's JS.
 
 ### The integrity bypass
 
@@ -190,8 +207,9 @@ claude-rtl-fix-desktop/
 │   │   ├── windows-acl.js            ← takeown / icacls helpers
 │   │   ├── embedded-payloads-source.js  ← dev-mode payload loader
 │   │   └── payload/
-│   │       ├── rtl-fix-hook.js       ← main-process Electron hook
-│   │       └── rtl-fix-payload.js    ← renderer-side RTL logic
+│   │       ├── rtl-fix-entry.js      ← asar entry shim (redirected from package.json main)
+│   │       ├── rtl-fix-hook.js       ← main-process hook (insertCSS + isolated-world JS)
+│   │       └── rtl-fix-payload.js    ← unused at runtime; kept for future renderer injection
 │   └── dist/                         ← build artifacts (gitignored)
 │       ├── patcher.bundled.js
 │       └── claude-rtl-patch.exe
@@ -249,7 +267,7 @@ These are mechanical to add once the patcher itself is verified to work on macOS
 ## Known limitations & open risks
 
 - **Windows MSIX "Repair"** will revert the patch. Re-running `claude-rtl-patch.exe` (or just waiting for the watcher) puts it back.
-- **Microsoft Defender / corporate AV** may flag the modification of files in `WindowsApps`. Defender shouldn't (this is a common pattern for system utilities), but specific AV products can.
+- **Third-party antivirus** may flag or quarantine the patcher or the modified Claude files. See the [Antivirus notice](#antivirus-notice) section above for step-by-step instructions. Windows Defender is handled automatically by the installer.
 - **Anthropic could change Claude's main entry filename**, which would break our `package.json` rewrite logic. Mitigation: the patcher records the original main filename in a `__rtlFixOriginalMain` key, so even after changes our unpatch still works correctly.
 - **An Electron major version bump** could change the SEA / fuse format. The integrity module would need an update — easy fix, just a dependency bump.
 - **The patcher binary is large (~100 MB)** because Node SEA includes the full Node runtime. The installer compresses well (~35 MB) but it's not tiny. A future optimization is to ship the bundled JS plus a smaller embedded runtime (Bun, QuickJS, etc.) but the convenience of SEA outweighs the size cost for now.
