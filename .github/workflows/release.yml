@@ -126,7 +126,7 @@ jobs:
           node-version: '22'
 
       - name: Install Inno Setup 6
-        run: choco install innosetup --version=6.2.2 -y --no-progress
+        run: choco install innosetup -y --no-progress --ignore-checksums
         shell: cmd
 
       - name: Build installer
