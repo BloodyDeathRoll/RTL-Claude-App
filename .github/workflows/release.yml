@@ -1,14 +1,121 @@
 name: Build & Release
 
+# Runs on every push to main and every PR so regressions are caught early.
+# The Windows installer build only runs on version tags and manual dispatch
+# (it's slow and produces the actual release artifact).
+
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    tags: ['v*']
+  pull_request:
   workflow_dispatch:
 
 jobs:
-  build:
+
+  # ── macOS: install Claude, patch it, verify, unpatch ──────────────────────
+  #
+  # This job is the primary correctness gate. It confirms:
+  #   1. The patcher finds Claude installed in /Applications
+  #   2. The asar is extracted, modified, and repacked without error
+  #   3. The Electron fuse flip succeeds on the real Claude binary
+  #   4. codesign --sign - re-signs the .app bundle without Gatekeeper errors
+  #   5. The __rtlFixOriginalMain marker is present after patching
+  #   6. --unpatch cleanly removes the marker and our three injected files
+  #
+  # GitHub's macos-latest runners have SIP disabled, so codesign and fuse
+  # operations work without additional entitlements. This closely mirrors
+  # what a user's machine looks like after they've approved Claude in Gatekeeper.
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Claude via Homebrew
+        # brew cask handles the DMG mount/copy and sets correct /Applications ownership.
+        run: brew install --cask claude
+
+      - name: Install patcher dependencies
+        working-directory: claude-rtl-fix-desktop/claude-rtl-desktop/patcher
+        run: npm install --no-fund --no-audit
+
+      - name: Patch Claude
+        working-directory: claude-rtl-fix-desktop/claude-rtl-desktop/patcher
+        run: sudo node src/patch.js
+
+      - name: Verify patch marker present
+        # Reads app.asar's package.json directly (no extraction needed —
+        # @electron/asar can read individual files from a packed archive).
+        working-directory: claude-rtl-fix-desktop/claude-rtl-desktop/patcher
+        run: |
+          node -e "
+            const asar = require('@electron/asar');
+            const p = '/Applications/Claude.app/Contents/Resources/app.asar';
+            const pkg = JSON.parse(asar.extractFile(p, 'package.json'));
+            if (!pkg.__rtlFixOriginalMain) {
+              console.error('FAIL: __rtlFixOriginalMain marker missing after patch');
+              process.exit(1);
+            }
+            if (pkg.main !== 'rtl-fix-entry.js') {
+              console.error('FAIL: main not redirected to rtl-fix-entry.js, got:', pkg.main);
+              process.exit(1);
+            }
+            console.log('OK: patched. original main =', pkg.__rtlFixOriginalMain);
+          "
+
+      - name: Unpatch Claude
+        working-directory: claude-rtl-fix-desktop/claude-rtl-desktop/patcher
+        run: sudo node src/patch.js --unpatch
+
+      - name: Verify patch marker removed
+        working-directory: claude-rtl-fix-desktop/claude-rtl-desktop/patcher
+        run: |
+          node -e "
+            const asar = require('@electron/asar');
+            const p = '/Applications/Claude.app/Contents/Resources/app.asar';
+            const pkg = JSON.parse(asar.extractFile(p, 'package.json'));
+            if (pkg.__rtlFixOriginalMain) {
+              console.error('FAIL: marker still present after unpatch');
+              process.exit(1);
+            }
+            console.log('OK: unpatched. main restored to', pkg.main);
+          "
+
+      # On tag pushes: package the patcher + installer scripts into a zip
+      # so macOS users can download a single archive from the Releases page.
+      - name: Package macOS archive
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd claude-rtl-fix-desktop/claude-rtl-desktop
+          mkdir -p _macos_pkg/claude-rtl-fix-macos
+          cp -R patcher/src       _macos_pkg/claude-rtl-fix-macos/
+          cp    patcher/package.json _macos_pkg/claude-rtl-fix-macos/
+          cp -R installer/macos   _macos_pkg/claude-rtl-fix-macos/
+          chmod +x _macos_pkg/claude-rtl-fix-macos/install.sh \
+                   _macos_pkg/claude-rtl-fix-macos/uninstall.sh
+          cd _macos_pkg
+          zip -r ../ClaudeRTLFix-macOS.zip claude-rtl-fix-macos
+
+      - name: Upload macOS artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClaudeRTLFix-macOS
+          path: claude-rtl-fix-desktop/claude-rtl-desktop/ClaudeRTLFix-macOS.zip
+
+  # ── Windows: full installer build ─────────────────────────────────────────
+  #
+  # Produces ClaudeRTLFix-Setup.exe via:
+  #   npm install + esbuild bundle → Node SEA .exe → Inno Setup installer
+  # Only runs on version tags and manual dispatch to save CI minutes.
+  build-windows:
     runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
 
     steps:
       - uses: actions/checkout@v4
@@ -33,9 +140,26 @@ jobs:
           name: ClaudeRTLFix-Setup
           path: claude-rtl-fix-desktop/claude-rtl-desktop/installer/windows/Output/ClaudeRTLFix-Setup.exe
 
+  # ── GitHub Release: attach both artifacts ─────────────────────────────────
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [test-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: ClaudeRTLFix-Setup
+
+      - name: Download macOS archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ClaudeRTLFix-macOS
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: claude-rtl-fix-desktop/claude-rtl-desktop/installer/windows/Output/ClaudeRTLFix-Setup.exe
+          files: |
+            ClaudeRTLFix-Setup.exe
+            ClaudeRTLFix-macOS.zip
           generate_release_notes: true

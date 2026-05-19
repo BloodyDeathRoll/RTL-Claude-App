@@ -461,8 +461,14 @@ async function main() {
 }
 
 function launchClaude(isMsix, binaryPath) {
-  if (process.platform !== 'win32') return;
   const { spawn } = require('child_process');
+  if (process.platform === 'darwin') {
+    try {
+      spawn('open', ['-a', 'Claude'], { detached: true, stdio: 'ignore' }).unref();
+    } catch (_) {}
+    return;
+  }
+  if (process.platform !== 'win32') return;
   try {
     if (isMsix) {
       const familyName = execFileSync('powershell.exe', [

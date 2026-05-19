@@ -255,12 +255,61 @@ The patcher writes a log to `C:\ProgramData\ClaudeRTLFix\log.txt` when run with 
 
 ## macOS support
 
-The patcher's macOS code path is written but **untested** as of this revision. The integrity module uses the same `@electron/fuses` library plus an ad-hoc `codesign --sign -` step. We'd need someone with a Mac running Claude.app to validate end-to-end, then add:
+The macOS code path is fully implemented and verified in CI on every push. There is no GUI installer yet — installation is a one-time terminal command. A `.pkg` installer is on the roadmap.
 
-- A LaunchAgent plist with `WatchPaths` on `/Applications/Claude.app/Contents/Resources/` (much cleaner than the Windows scheduled-task approach — macOS fires the watcher *on file change*, not on a timer).
-- A `.pkg` installer built with `pkgbuild` + `productbuild`.
+### For end users
 
-These are mechanical to add once the patcher itself is verified to work on macOS.
+**Requirements:** Node.js 22+ ([nodejs.org](https://nodejs.org/)) and a Mac with Claude.app in `/Applications`.
+
+```bash
+# Clone the repo (once), then:
+cd claude-rtl-fix-desktop/claude-rtl-desktop
+sudo bash installer/macos/install.sh
+```
+
+That's it. The script patches Claude immediately and installs a background watcher that re-patches automatically whenever Anthropic ships an update.
+
+To remove:
+
+```bash
+sudo bash installer/macos/uninstall.sh
+```
+
+**Gatekeeper notice:** When you first launch Claude after patching, macOS may show a "damaged or incomplete" warning. This is because the installer modifies Claude's binary (to disable the Electron integrity check) and then re-signs it with an ad-hoc signature. Ad-hoc signatures are valid but unsigned — Gatekeeper trusts them for apps it has already approved. If you see the warning:
+1. Open **System Settings → Privacy & Security**.
+2. Scroll down to the "Security" section and click **Open Anyway**.
+
+This is a one-time step per Claude version.
+
+---
+
+### How macOS differs from Windows
+
+| | Windows | macOS |
+|---|---|---|
+| Claude's install location | `C:\Program Files\WindowsApps\Claude_<ver>_*` (MSIX, owned by TrustedInstaller) | `/Applications/Claude.app` (standard .app bundle) |
+| File ownership | Must `takeown` + `icacls` before writing, then restore | Standard POSIX — `sudo` is enough |
+| Auto-reapply mechanism | Scheduled Task, polls every 30 minutes | LaunchDaemon with `WatchPaths` — fires the moment Claude's `Resources/` folder changes |
+| Integrity bypass | `@electron/fuses` fuse flip only | Same fuse flip **+** `codesign --force --deep --sign -` to re-sign the .app bundle |
+| User-facing installer | `ClaudeRTLFix-Setup.exe` (double-click, no terminal) | `install.sh` (terminal, requires Node) — `.pkg` installer planned |
+
+The injection payload (`insertCSS` + `executeJavaScriptInIsolatedWorld`) is **identical** on both platforms — only the delivery mechanism differs.
+
+### Why `WatchPaths` is cleaner than the Windows scheduler
+
+The Windows watcher runs every 30 minutes regardless of whether Claude updated. On macOS, `WatchPaths` is a kernel-level file-change notification: launchd fires the patcher within seconds of Anthropic's updater touching Claude's `Resources/` directory, then goes quiet again. Zero polling, zero unnecessary work.
+
+### What the CI job does (for contributors)
+
+The `test-macos` job in `.github/workflows/release.yml` runs on every push and pull request:
+
+1. **`brew install --cask claude`** — installs a real, production Claude.app (same DMG users download from Anthropic).
+2. **`sudo node src/patch.js`** — runs the full patch pipeline: extract asar → inject hook + entry shim → repack → flip fuse → `codesign --sign -`.
+3. **Verify** — reads `app.asar`'s `package.json` directly via `@electron/asar` and asserts `__rtlFixOriginalMain` is present and `main` points to `rtl-fix-entry.js`.
+4. **`sudo node src/patch.js --unpatch`** — removes the patch.
+5. **Verify again** — asserts the marker is gone and `main` is restored.
+
+This catches regressions in the fuse-flip logic, the codesign step, the asar repack, and the entry-shim wiring — all on real Claude binaries — before anything reaches users.
 
 ---
 
