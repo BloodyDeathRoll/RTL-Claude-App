@@ -18,7 +18,7 @@ To remove: Settings → Apps → Claude RTL Fix → Uninstall. This restores Cla
 
 **You may need to add antivirus exclusions before or during installation.**
 
-This tool modifies files inside `C:\Program Files\WindowsApps\` — a protected system directory where Claude's MSIX package lives. It also modifies `Claude.exe` to disable an Electron integrity check. These are legitimate operations, but they look identical to what malware patchers do. Some antivirus products will quarantine the patcher or the modified files.
+This tool modifies files inside `C:\Program Files\WindowsApps\` - a protected system directory where Claude's MSIX package lives. It also modifies `Claude.exe` to disable an Electron integrity check. These are legitimate operations, but they look identical to what malware patchers do. Some antivirus products will quarantine the patcher or the modified files.
 
 **Windows Defender** is handled automatically: the installer adds exclusions for `C:\Program Files\WindowsApps` and `C:\Program Files\ClaudeRTLFix` before running the patcher, so Defender should not interfere.
 
@@ -34,7 +34,7 @@ If you miss this step and your AV quarantines something:
 2. Add the exclusions above.
 3. Run `claude-rtl-patch.exe --unpatch` then `claude-rtl-patch.exe` again to re-apply cleanly.
 
-> **Why isn't the exe signed?** Code-signing certificates cost $200–600/year. This is a free open-source tool. We plan to apply for a free certificate through [SignPath Foundation](https://signpath.org/free-code-signing) once the tool has been stable for a while. In the meantime, Windows SmartScreen will show a "Windows protected your PC" warning on first run — click "More info" → "Run anyway".
+> **Why isn't the exe signed?** Code-signing certificates cost $200–600/year. This is a free open-source tool. We plan to apply for a free certificate through [SignPath Foundation](https://signpath.org/free-code-signing) once the tool has been stable for a while. In the meantime, Windows SmartScreen will show a "Windows protected your PC" warning on first run - click "More info" → "Run anyway".
 
 ---
 
@@ -76,7 +76,7 @@ The architecture has three pieces:
 
 ### The injection technique
 
-We don't try to splice our code into Claude's bundled JS — that would break every time Anthropic bumps their bundler hash. Instead, inside `app.asar`:
+We don't try to splice our code into Claude's bundled JS - that would break every time Anthropic bumps their bundler hash. Instead, inside `app.asar`:
 
 1. We write three small files: `rtl-fix-payload.js`, `rtl-fix-hook.js`, `rtl-fix-entry.js`.
 2. We rewrite the asar's `package.json` so its `main` field points at our `rtl-fix-entry.js` instead of Claude's original main.
@@ -84,9 +84,9 @@ We don't try to splice our code into Claude's bundled JS — that would break ev
 
 The hook runs in the **main process**. It uses two complementary mechanisms:
 
-**1. CSS injection via `webContents.insertCSS()`** — sets `unicode-bidi: plaintext` on every text block (equivalent to `dir="auto"`) and forces `direction: ltr` on code blocks. CSS rules apply automatically to elements added later by React, so no observer is needed for text direction.
+**1. CSS injection via `webContents.insertCSS()`** - sets `unicode-bidi: plaintext` on every text block (equivalent to `dir="auto"`) and forces `direction: ltr` on code blocks. CSS rules apply automatically to elements added later by React, so no observer is needed for text direction.
 
-**2. `dir="auto"` on list containers via `webContents.executeJavaScriptInIsolatedWorld()`** — `unicode-bidi: plaintext` in CSS cannot move list markers (numbers/bullets) to the correct side for RTL lists because CSS cannot scan block children to detect direction. Setting `dir="auto"` as an HTML attribute on `ol`/`ul` elements does. A `MutationObserver` running in isolated world 999 catches list elements as React adds them.
+**2. `dir="auto"` on list containers via `webContents.executeJavaScriptInIsolatedWorld()`** - `unicode-bidi: plaintext` in CSS cannot move list markers (numbers/bullets) to the correct side for RTL lists because CSS cannot scan block children to detect direction. Setting `dir="auto"` as an HTML attribute on `ol`/`ul` elements does. A `MutationObserver` running in isolated world 999 catches list elements as React adds them.
 
 The isolated world is important: `executeJavaScript` (world 0) runs in Claude's renderer context and can interfere with React's update cycle. World 999 shares the DOM but is invisible to Claude's JS.
 
@@ -96,7 +96,7 @@ Electron 12+ supports an `EnableEmbeddedAsarIntegrityValidation` fuse that hashe
 
 The patcher uses [@electron/fuses](https://github.com/electron/fuses) to flip this fuse off in `claude.exe`. No hash recomputation, no maintenance burden when Anthropic re-bundles.
 
-The `OnlyLoadAppFromAsar` fuse is left on — we still want Claude to load from asar, just without the integrity check.
+The `OnlyLoadAppFromAsar` fuse is left on - we still want Claude to load from asar, just without the integrity check.
 
 ### The MSIX wrinkle
 
@@ -105,17 +105,17 @@ Anthropic ships Claude on Windows as a signed MSIX package, not the legacy Squir
 | Property | Implication |
 |---|---|
 | Installed under `C:\Program Files\WindowsApps`, owned by `TrustedInstaller`, ACL-locked | We have to `takeown` and `icacls` before writing, and restore ownership after. The patcher does this automatically when it detects an MSIX install. |
-| Updates install to a **new** versioned directory, not in place | Our patch is wiped after every update — but the old directory gets cleaned up by Windows, so the watcher just patches the new one. No "undo" logic needed. |
-| Package signature gets invalidated by our changes | Doesn't prevent launch (Windows checks signature at install, not launch). Will block manual "Repair" from Windows Settings, which would restore the original asar — that's actually a useful escape hatch. |
+| Updates install to a **new** versioned directory, not in place | Our patch is wiped after every update - but the old directory gets cleaned up by Windows, so the watcher just patches the new one. No "undo" logic needed. |
+| Package signature gets invalidated by our changes | Doesn't prevent launch (Windows checks signature at install, not launch). Will block manual "Repair" from Windows Settings, which would restore the original asar - that's actually a useful escape hatch. |
 
 The patcher locates the current install via `Get-AppxPackage Claude` instead of hard-coding paths, so it always finds the latest version regardless of which directory Windows put it in.
 
 ### The auto-reapply loop
 
 The Scheduled Task triggers on three events:
-- **At system boot** — catches the case where Claude was updated while the machine was off.
-- **At any user logon** — catches the case where an update landed since the last logon.
-- **Every 30 minutes** while the machine is running — catches the case where Claude updates during an active session.
+- **At system boot** - catches the case where Claude was updated while the machine was off.
+- **At any user logon** - catches the case where an update landed since the last logon.
+- **Every 30 minutes** while the machine is running - catches the case where Claude updates during an active session.
 
 Each run, the patcher does a fast-path check (parses `app.asar`'s `package.json` and looks for our `__rtlFixOriginalMain` marker). If the current install is already patched it exits in ~50ms. Only if it sees a fresh, unpatched MSIX directory does it do the full unpack/inject/repack cycle.
 
@@ -134,7 +134,7 @@ To build a release on Windows:
 | Node 22+ | Bundles the patcher with esbuild, then SEAs it into a `.exe` using Node's built-in Single Executable Application support. | https://nodejs.org/ |
 | Inno Setup 6 | Wraps everything into the user-facing `ClaudeRTLFix-Setup.exe`. | https://jrsoftware.org/isinfo.php |
 
-You don't need anything else — no Visual Studio, no Python, no MSBuild, no signing certificates.
+You don't need anything else - no Visual Studio, no Python, no MSBuild, no signing certificates.
 
 ### Building a release
 
@@ -162,7 +162,7 @@ node src\patch.js --unpatch    REM remove the patch
 node src\patch.js --quiet      REM what the watcher runs (logs to file)
 ```
 
-Source mode reads the payload files from disk, so edits to `src/payload/*.js` take effect immediately on the next run — no rebuild needed.
+Source mode reads the payload files from disk, so edits to `src/payload/*.js` take effect immediately on the next run - no rebuild needed.
 
 To override which Claude install to operate on:
 
@@ -229,7 +229,7 @@ claude-rtl-fix-desktop/
 
 `build-windows.cmd` writes a SEA config, runs `node --experimental-sea-config` to generate the blob, copies the host's `node.exe`, and uses `npx postject` to inject the blob into the copy.
 
-`installer.iss` declares: paste `claude-rtl-patch.exe` and `watcher-task.xml` into `Program Files\ClaudeRTLFix`, then run two commands — `claude-rtl-patch.exe` once for the initial patch, and `schtasks /Create /XML watcher-task.xml` to register the watcher. The uninstaller runs them in reverse.
+`installer.iss` declares: paste `claude-rtl-patch.exe` and `watcher-task.xml` into `Program Files\ClaudeRTLFix`, then run two commands - `claude-rtl-patch.exe` once for the initial patch, and `schtasks /Create /XML watcher-task.xml` to register the watcher. The uninstaller runs them in reverse.
 
 `watcher-task.xml` is a standard Task Scheduler XML with `<UserId>S-1-5-18</UserId>` (LocalSystem) and three triggers (boot, logon, time-based 30-minute repetition).
 
@@ -255,7 +255,7 @@ The patcher writes a log to `C:\ProgramData\ClaudeRTLFix\log.txt` when run with 
 
 ## macOS support
 
-The macOS code path is fully implemented and verified in CI on every push. There is no GUI installer yet — installation is a one-time terminal command. A `.pkg` installer is on the roadmap.
+The macOS code path is fully implemented and verified in CI on every push. There is no GUI installer yet - installation is a one-time terminal command. A `.pkg` installer is on the roadmap.
 
 ### For end users
 
@@ -275,7 +275,7 @@ To remove:
 sudo bash installer/macos/uninstall.sh
 ```
 
-**Gatekeeper notice:** When you first launch Claude after patching, macOS may show a "damaged or incomplete" warning. This is because the installer modifies Claude's binary (to disable the Electron integrity check) and then re-signs it with an ad-hoc signature. Ad-hoc signatures are valid but unsigned — Gatekeeper trusts them for apps it has already approved. If you see the warning:
+**Gatekeeper notice:** When you first launch Claude after patching, macOS may show a "damaged or incomplete" warning. This is because the installer modifies Claude's binary (to disable the Electron integrity check) and then re-signs it with an ad-hoc signature. Ad-hoc signatures are valid but unsigned - Gatekeeper trusts them for apps it has already approved. If you see the warning:
 1. Open **System Settings → Privacy & Security**.
 2. Scroll down to the "Security" section and click **Open Anyway**.
 
@@ -288,12 +288,12 @@ This is a one-time step per Claude version.
 | | Windows | macOS |
 |---|---|---|
 | Claude's install location | `C:\Program Files\WindowsApps\Claude_<ver>_*` (MSIX, owned by TrustedInstaller) | `/Applications/Claude.app` (standard .app bundle) |
-| File ownership | Must `takeown` + `icacls` before writing, then restore | Standard POSIX — `sudo` is enough |
-| Auto-reapply mechanism | Scheduled Task, polls every 30 minutes | LaunchDaemon with `WatchPaths` — fires the moment Claude's `Resources/` folder changes |
+| File ownership | Must `takeown` + `icacls` before writing, then restore | Standard POSIX - `sudo` is enough |
+| Auto-reapply mechanism | Scheduled Task, polls every 30 minutes | LaunchDaemon with `WatchPaths` - fires the moment Claude's `Resources/` folder changes |
 | Integrity bypass | `@electron/fuses` fuse flip only | Same fuse flip **+** `codesign --force --deep --sign -` to re-sign the .app bundle |
-| User-facing installer | `ClaudeRTLFix-Setup.exe` (double-click, no terminal) | `install.sh` (terminal, requires Node) — `.pkg` installer planned |
+| User-facing installer | `ClaudeRTLFix-Setup.exe` (double-click, no terminal) | `install.sh` (terminal, requires Node) - `.pkg` installer planned |
 
-The injection payload (`insertCSS` + `executeJavaScriptInIsolatedWorld`) is **identical** on both platforms — only the delivery mechanism differs.
+The injection payload (`insertCSS` + `executeJavaScriptInIsolatedWorld`) is **identical** on both platforms - only the delivery mechanism differs.
 
 ### Why `WatchPaths` is cleaner than the Windows scheduler
 
@@ -303,13 +303,13 @@ The Windows watcher runs every 30 minutes regardless of whether Claude updated. 
 
 The `test-macos` job in `.github/workflows/release.yml` runs on every push and pull request:
 
-1. **`brew install --cask claude`** — installs a real, production Claude.app (same DMG users download from Anthropic).
-2. **`sudo node src/patch.js`** — runs the full patch pipeline: extract asar → inject hook + entry shim → repack → flip fuse → `codesign --sign -`.
-3. **Verify** — reads `app.asar`'s `package.json` directly via `@electron/asar` and asserts `__rtlFixOriginalMain` is present and `main` points to `rtl-fix-entry.js`.
-4. **`sudo node src/patch.js --unpatch`** — removes the patch.
-5. **Verify again** — asserts the marker is gone and `main` is restored.
+1. **`brew install --cask claude`** - installs a real, production Claude.app (same DMG users download from Anthropic).
+2. **`sudo node src/patch.js`** - runs the full patch pipeline: extract asar → inject hook + entry shim → repack → flip fuse → `codesign --sign -`.
+3. **Verify** - reads `app.asar`'s `package.json` directly via `@electron/asar` and asserts `__rtlFixOriginalMain` is present and `main` points to `rtl-fix-entry.js`.
+4. **`sudo node src/patch.js --unpatch`** - removes the patch.
+5. **Verify again** - asserts the marker is gone and `main` is restored.
 
-This catches regressions in the fuse-flip logic, the codesign step, the asar repack, and the entry-shim wiring — all on real Claude binaries — before anything reaches users.
+This catches regressions in the fuse-flip logic, the codesign step, the asar repack, and the entry-shim wiring - all on real Claude binaries - before anything reaches users.
 
 ---
 
@@ -318,7 +318,7 @@ This catches regressions in the fuse-flip logic, the codesign step, the asar rep
 - **Windows MSIX "Repair"** will revert the patch. Re-running `claude-rtl-patch.exe` (or just waiting for the watcher) puts it back.
 - **Third-party antivirus** may flag or quarantine the patcher or the modified Claude files. See the [Antivirus notice](#antivirus-notice) section above for step-by-step instructions. Windows Defender is handled automatically by the installer.
 - **Anthropic could change Claude's main entry filename**, which would break our `package.json` rewrite logic. Mitigation: the patcher records the original main filename in a `__rtlFixOriginalMain` key, so even after changes our unpatch still works correctly.
-- **An Electron major version bump** could change the SEA / fuse format. The integrity module would need an update — easy fix, just a dependency bump.
+- **An Electron major version bump** could change the SEA / fuse format. The integrity module would need an update - easy fix, just a dependency bump.
 - **The patcher binary is large (~100 MB)** because Node SEA includes the full Node runtime. The installer compresses well (~35 MB) but it's not tiny. A future optimization is to ship the bundled JS plus a smaller embedded runtime (Bun, QuickJS, etc.) but the convenience of SEA outweighs the size cost for now.
 
 ---

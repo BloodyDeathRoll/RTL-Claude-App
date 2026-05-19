@@ -50,11 +50,11 @@ Tail the watcher log: `Get-Content C:\ProgramData\ClaudeRTLFix\log.txt -Wait`
 
 The patcher has three layers:
 
-1. **`src/patch.js`** — CLI entry and orchestration. Locates Claude via `Get-AppxPackage` (MSIX) or legacy Squirrel paths, extracts `app.asar` to a temp dir, calls the patch/unpatch functions, repacks, and cleans up. Idempotent: checks for `__rtlFixOriginalMain` marker in `app.asar`'s `package.json` before doing anything.
+1. **`src/patch.js`** - CLI entry and orchestration. Locates Claude via `Get-AppxPackage` (MSIX) or legacy Squirrel paths, extracts `app.asar` to a temp dir, calls the patch/unpatch functions, repacks, and cleans up. Idempotent: checks for `__rtlFixOriginalMain` marker in `app.asar`'s `package.json` before doing anything.
 
-2. **`src/integrity.js`** — flips the `EnableEmbeddedAsarIntegrityValidation` Electron fuse off in `claude.exe`/`Claude` using `@electron/fuses`, then re-signs ad-hoc on macOS via `codesign --force --deep --sign -`.
+2. **`src/integrity.js`** - flips the `EnableEmbeddedAsarIntegrityValidation` Electron fuse off in `claude.exe`/`Claude` using `@electron/fuses`, then re-signs ad-hoc on macOS via `codesign --force --deep --sign -`.
 
-3. **`src/windows-acl.js`** — takes ownership (`takeown`) and grants write ACLs (`icacls`) on files inside `C:\Program Files\WindowsApps\` (which is owned by TrustedInstaller), then restores them after writing.
+3. **`src/windows-acl.js`** - takes ownership (`takeown`) and grants write ACLs (`icacls`) on files inside `C:\Program Files\WindowsApps\` (which is owned by TrustedInstaller), then restores them after writing.
 
 ### Injection technique
 
@@ -83,6 +83,6 @@ A Windows Scheduled Task (`installer/windows/watcher-task.xml`, runs as SYSTEM) 
 ## Known constraints
 
 - The `patcher/dist/` and `installer/windows/Output/` directories are gitignored build artifacts.
-- The `.exe` is ~100 MB because Node SEA embeds the full Node runtime — this is intentional.
+- The `.exe` is ~100 MB because Node SEA embeds the full Node runtime - this is intentional.
 - macOS code path is implemented in `integrity.js` but **untested** on real hardware.
 - MSIX "Repair" from Windows Settings reverts the patch (the watcher re-applies it within 30 min).
