@@ -95,7 +95,7 @@ jobs:
           mkdir -p _macos_pkg/claude-rtl-fix-macos
           cp -R patcher/src       _macos_pkg/claude-rtl-fix-macos/
           cp    patcher/package.json _macos_pkg/claude-rtl-fix-macos/
-          cp -R installer/macos   _macos_pkg/claude-rtl-fix-macos/
+          cp -R installer/macos/  _macos_pkg/claude-rtl-fix-macos/
           chmod +x _macos_pkg/claude-rtl-fix-macos/install.sh \
                    _macos_pkg/claude-rtl-fix-macos/uninstall.sh
           cd _macos_pkg
