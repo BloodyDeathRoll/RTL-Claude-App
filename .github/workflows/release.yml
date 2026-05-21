@@ -166,3 +166,16 @@ jobs:
             ClaudeRTLFix-Setup.exe
             ClaudeRTLFix-macOS.zip
           generate_release_notes: true
+          body: |
+            ## Installation
+
+            **Windows** - download `ClaudeRTLFix-Setup.exe` and run it. Accept the UAC prompt. If SmartScreen warns you, click "More info" then "Run anyway".
+
+            **macOS** - download `ClaudeRTLFix-macOS.zip`, extract it, then in Terminal:
+            ```bash
+            cd claude-rtl-fix-macos
+            sudo bash install.sh
+            ```
+            Node.js 22+ is required ([nodejs.org](https://nodejs.org/)).
+
+            Full instructions (antivirus setup, troubleshooting, uninstall): **[INSTALL.md](https://github.com/BloodyDeathRoll/RTL-Claude-App/blob/main/INSTALL.md)**
