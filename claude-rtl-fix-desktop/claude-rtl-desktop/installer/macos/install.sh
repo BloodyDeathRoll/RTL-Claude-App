@@ -20,7 +20,19 @@ DAEMON_LABEL="com.claudertlfix.watcher"
 DAEMON_PLIST="/Library/LaunchDaemons/$DAEMON_LABEL.plist"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PATCHER_DIR="$(cd "$SCRIPT_DIR/../../patcher" && pwd)"
+# Two supported layouts:
+#   1. Release ZIP (flat):  install.sh, package.json, src/ all in SCRIPT_DIR
+#   2. Source tree:         installer/macos/install.sh with patcher/ two levels up
+if [ -f "$SCRIPT_DIR/package.json" ] && [ -d "$SCRIPT_DIR/src" ]; then
+  PATCHER_DIR="$SCRIPT_DIR"
+elif [ -d "$SCRIPT_DIR/../../patcher" ]; then
+  PATCHER_DIR="$(cd "$SCRIPT_DIR/../../patcher" && pwd)"
+else
+  echo "error: cannot locate patcher files." >&2
+  echo "  expected either package.json + src/ next to install.sh," >&2
+  echo "  or a patcher/ directory two levels above it." >&2
+  exit 1
+fi
 
 # ---- require root ----
 if [ "$(id -u)" -ne 0 ]; then
