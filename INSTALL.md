@@ -103,6 +103,17 @@ Run this in Terminal:
 sudo xattr -rd com.apple.quarantine /Applications/Claude.app
 ```
 
+**macOS: `EPERM: operation not permitted` when the installer tries to write into `/Applications/Claude.app`**
+
+macOS Ventura (13) and later block modifications to signed app bundles in `/Applications` via the **App Management** privacy permission. `sudo` does NOT bypass this - the terminal app that launched the installer needs the permission itself.
+
+1. Open **System Settings → Privacy & Security → App Management**.
+2. Enable the toggle for your terminal app (Terminal, iTerm2, Ghostty, etc.).
+3. **Quit the terminal completely** (Cmd+Q) and reopen it. The new permission only applies to fresh sessions.
+4. Re-run `sudo bash install.sh`.
+
+If App Management alone does not unblock it, also grant **Full Disk Access** to the same terminal app.
+
 **macOS: patch isn't applied after a Claude update**
 The LaunchDaemon fires automatically when Claude's Resources folder changes. If it doesn't trigger within a minute, you can patch manually:
 ```bash

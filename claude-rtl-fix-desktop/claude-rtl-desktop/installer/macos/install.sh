@@ -54,6 +54,35 @@ if [ "$NODE_MAJOR" -lt 22 ]; then
 fi
 echo "[check] node $NODE_MAJOR at $NODE — OK"
 
+# ---- preflight: can we actually write into Claude.app? ----
+# Since macOS Ventura (13), the "App Management" privacy permission gates writes
+# into signed app bundles in /Applications, even for root. If the terminal that
+# invoked us lacks App Management, the patcher will fail mid-write with EPERM.
+# Catch it now with a readable message instead of an opaque crash later.
+CLAUDE_RESOURCES="/Applications/Claude.app/Contents/Resources"
+if [ -d "$CLAUDE_RESOURCES" ]; then
+  PROBE="$CLAUDE_RESOURCES/.rtlfix-writeprobe-$$"
+  if ! : > "$PROBE" 2>/dev/null; then
+    echo "" >&2
+    echo "error: cannot write into $CLAUDE_RESOURCES" >&2
+    echo "" >&2
+    echo "macOS is blocking modifications to Claude.app via the 'App Management'" >&2
+    echo "privacy permission. sudo does NOT bypass this check — the terminal app" >&2
+    echo "that launched the install needs the permission itself." >&2
+    echo "" >&2
+    echo "To fix:" >&2
+    echo "  1. Open System Settings -> Privacy & Security -> App Management" >&2
+    echo "  2. Enable the toggle for your terminal app (Terminal, iTerm2, etc.)" >&2
+    echo "  3. Quit the terminal completely (Cmd+Q) and reopen it" >&2
+    echo "  4. Re-run: sudo bash install.sh" >&2
+    echo "" >&2
+    echo "If App Management alone does not unblock it, also grant 'Full Disk" >&2
+    echo "Access' to the same terminal app." >&2
+    exit 1
+  fi
+  rm -f "$PROBE"
+fi
+
 # ---- install patcher files ----
 echo "[1/4] Installing patcher to $INSTALL_DIR..."
 rm -rf "$INSTALL_DIR"

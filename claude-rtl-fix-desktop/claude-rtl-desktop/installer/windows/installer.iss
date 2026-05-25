@@ -18,7 +18,7 @@
 
 #define MyAppName       "Claude RTL Fix"
 #define MyAppShortName  "ClaudeRTLFix"
-#define MyAppVersion    "0.1.6"
+#define MyAppVersion    "0.1.7"
 #define MyAppPublisher  "Claude RTL Fix"
 #define MyAppURL        "https://github.com/BloodyDeathRoll/RTL-Claude-App"
 
