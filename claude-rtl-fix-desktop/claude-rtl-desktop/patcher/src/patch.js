@@ -152,7 +152,15 @@ function buildUnpackGlob(asarPath) {
   }
   walk(unpackedDir, '');
   if (!files.length) return null;
-  return files.length === 1 ? files[0] : '{' + files.join(',') + '}';
+  // Escape glob metacharacters in each path so filenames containing , { } * ?
+  // [ ] etc. are matched literally (and, inside the brace list, an embedded
+  // comma doesn't split one file into two bogus alternatives). Without this an
+  // unpacked native module with such a name would get packed INTO the asar and
+  // fail to load at runtime.
+  const esc = (s) => s.replace(/[\\,{}()!+@|*?[\]]/g, '\\$&');
+  return files.length === 1
+    ? esc(files[0])
+    : '{' + files.map(esc).join(',') + '}';
 }
 
 function findClaude(explicit) {
@@ -183,7 +191,15 @@ function patchUnpackedTree(unpackedDir) {
     throw new Error('No package.json inside app.asar — unexpected structure.');
   }
   const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-  const originalMain = pkg.main || 'index.js';
+  // Idempotent: if this tree is already patched (our marker is present, or main
+  // already points at our entry shim), keep the previously-saved original main
+  // instead of recording the entry shim as the "original". Recording the shim
+  // would make a later --unpatch restore main → rtl-fix-entry.js, a file that
+  // unpatch deletes, bricking the app.
+  const alreadyHooked = (ORIG_MAIN_KEY in pkg) || pkg.main === RTL_ENTRY;
+  const originalMain = alreadyHooked
+    ? (pkg[ORIG_MAIN_KEY] || 'index.js')
+    : (pkg.main || 'index.js');
 
   // Write our three payload files to the asar root.
   fs.writeFileSync(path.join(unpackedDir, RTL_ENTRY),   embedded.RTL_FIX_ENTRY_SOURCE);
@@ -247,7 +263,14 @@ function backupPath(asarPath, isMsix) {
   );
   fs.mkdirSync(root, { recursive: true });
   // Include a fragment of the version dir so we know which Claude this was.
-  const versionTag = (asarPath.match(/Claude_([\d.]+)_/i) || [])[1] || 'unknown';
+  // When the version can't be parsed, fall back to a short hash of the full
+  // asar path rather than a shared literal 'unknown' — otherwise two different
+  // installs would collide on one backup file and a later --unpatch could
+  // restore the wrong install's asar.
+  const parsedVersion = (asarPath.match(/Claude_([\d.]+)_/i) || [])[1];
+  const versionTag = parsedVersion ||
+    ('unknown-' + require('crypto').createHash('sha1')
+      .update(asarPath).digest('hex').slice(0, 8));
   return path.join(root, 'app.asar.' + versionTag + '.rtlbak');
 }
 
