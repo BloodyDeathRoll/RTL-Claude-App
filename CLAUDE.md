@@ -62,8 +62,8 @@ Instead of splicing into Claude's bundled JS (fragile against bundler hash chang
 - Writes `rtl-fix-payload.js`, `rtl-fix-hook.js`, and `rtl-fix-entry.js` into the asar root.
 - Rewrites `package.json` `"main"` → `rtl-fix-entry.js`, saving the original in `__rtlFixOriginalMain`.
 - `rtl-fix-entry.js` does `require('./rtl-fix-hook')` then `require('./<original_main>')`.
-- `rtl-fix-hook.js` (main process) listens for `web-contents-created` and injects `rtl-fix-payload.js` via `executeJavaScript` on every load/navigation.
-- `rtl-fix-payload.js` (renderer) sets `dir="auto"` on text blocks and `dir="ltr"` on code elements, then installs a `MutationObserver` for streaming tokens.
+- `rtl-fix-hook.js` (main process) listens for `web-contents-created` and, on every load/navigation: injects the read-direction RTL CSS via `webContents.insertCSS()`, runs a small list-fix script in isolated world 999 (sets `dir="auto"` on `ol`/`ul`), and injects `rtl-fix-payload.js` into the same isolated world.
+- `rtl-fix-payload.js` (renderer) is the **input-direction toggle**: a two-segment `EN | HE` switch injected into the composer. `HE` sets `direction:rtl`/`text-align:right` on the ProseMirror editor via a `<style>` rule keyed off `data-claude-input-dir="he"` on `<html>` (two explicit states, no auto-detection). It persists the choice in `localStorage`, syncs across windows via the `storage` event, and re-injects via a `MutationObserver` as the composer is swapped between the landing page and threads. Ported from the browser extension (v1.6.0).
 
 ### Payload embedding
 

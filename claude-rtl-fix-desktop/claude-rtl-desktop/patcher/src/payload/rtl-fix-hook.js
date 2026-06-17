@@ -1,7 +1,9 @@
 // Claude RTL Fix - main-process hook.
 // Loaded before Claude's own entry by rtl-fix-entry.js.
-// Injects RTL CSS via webContents.insertCSS() on every page load.
-// No preload injection, no JS execution in renderer — CSS only.
+// On every page load it: injects read-direction RTL CSS via
+// webContents.insertCSS(), runs the list-fix and the input-direction toggle
+// (rtl-fix-payload.js) in isolated world 999. No preload, and nothing touches
+// Claude's own JS world.
 'use strict';
 
 const { app } = require('electron');
@@ -32,6 +34,19 @@ const RTL_CSS =
   '{unicode-bidi:plaintext!important}' +
   'pre,code,kbd,samp,var' +
   '{direction:ltr!important;unicode-bidi:bidi-override!important}';
+
+// Renderer-side input-direction toggle (EN/HE switch in the composer). Lives in
+// rtl-fix-payload.js next to us in the asar; read once at startup and injected
+// into isolated world 999 on every load/navigation (it self-guards against
+// double init). Read failure is non-fatal — the rest of the RTL fix still works.
+const INPUT_DIR_JS = (() => {
+  try {
+    return fs.readFileSync(path.join(__dirname, 'rtl-fix-payload.js'), 'utf8');
+  } catch (e) {
+    dbg('payload read FAIL: ' + e.message);
+    return '';
+  }
+})();
 
 // Sets dir="auto" on list containers (existing and future) so markers
 // follow content direction. Runs in isolated world 999 — shares the DOM
@@ -68,6 +83,17 @@ function inject(wc) {
       );
   } catch (e) {
     dbg('isolatedJS THROW id=' + wc.id + ': ' + e.message);
+  }
+  if (INPUT_DIR_JS) {
+    try {
+      wc.executeJavaScriptInIsolatedWorld(999, [{ code: INPUT_DIR_JS }])
+        .then(
+          ()  => dbg('inputDirJS OK id=' + wc.id),
+          (e) => dbg('inputDirJS FAIL id=' + wc.id + ': ' + e.message)
+        );
+    } catch (e) {
+      dbg('inputDirJS THROW id=' + wc.id + ': ' + e.message);
+    }
   }
 }
 
