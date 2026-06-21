@@ -77,10 +77,13 @@ A Windows Scheduled Task (`installer/windows/watcher-task.xml`, runs as SYSTEM) 
 
 ## Release checklist
 
-1. Bump version in `patcher/package.json` and `installer/windows/installer.iss` (`MyAppVersion`).
-2. Run `build-all.cmd` on Windows.
-3. Test on a clean Windows VM.
-4. Upload `installer/windows/Output/ClaudeRTLFix-Setup.exe` to GitHub Releases.
+Full copy-paste process: see `RELEASING.md` in the working tree root. Summary:
+
+1. Bump version in three places: `patcher/package.json`, `installer/windows/installer.iss` (`MyAppVersion`), and `patcher/src/payload/rtl-fix-read.js` (`BUILD_STAMP`).
+2. `node build.js`, commit, push, then tag `vX.Y.Z` and push the tag.
+3. Run `build-all.cmd` on Windows.
+4. Test on a clean Windows VM (confirm `data-claude-rtl-build` reports the new version in DevTools).
+5. Upload `installer/windows/Output/ClaudeRTLFix-Setup.exe` to the GitHub Release and publish as `--latest`.
 
 ## Known constraints
 
