@@ -108,6 +108,14 @@
     applyInputDir(v);
     var btn = document.getElementById(INPUT_DIR_BTN_ID);
     if (btn) updateInputDirButton(btn, v);
+    // The mode is the single source of truth for the read-direction engine
+    // (rtl-fix-read.js) too, which runs in this same isolated world. The
+    // 'storage' event only fires in OTHER windows, so signal this window
+    // explicitly to make it re-judge all on-screen content live.
+    try {
+      window.dispatchEvent(new CustomEvent('claude-rtl-mode-change',
+        { detail: { mode: v } }));
+    } catch (_) {}
   }
 
   // --- the EN | HE switch --------------------------------------------------

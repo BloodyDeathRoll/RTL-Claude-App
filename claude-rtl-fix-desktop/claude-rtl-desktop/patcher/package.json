@@ -1,6 +1,6 @@
 {
   "name": "claude-rtl-fix-desktop",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Patches Claude desktop app to fix RTL text rendering.",
   "main": "src/patch.js",
   "bin": {

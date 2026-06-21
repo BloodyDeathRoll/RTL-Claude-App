@@ -1,9 +1,12 @@
 // Claude RTL Fix - main-process hook.
 // Loaded before Claude's own entry by rtl-fix-entry.js.
-// On every page load it: injects read-direction RTL CSS via
-// webContents.insertCSS(), runs the list-fix and the input-direction toggle
-// (rtl-fix-payload.js) in isolated world 999. No preload, and nothing touches
-// Claude's own JS world.
+// On every page load / navigation it injects two renderer scripts into isolated
+// world 999 (executeJavaScriptInIsolatedWorld — shares the page DOM, stays out
+// of Claude's own JS world; no preload):
+//   - rtl-fix-read.js    : content-driven READ-direction engine for responses
+//                          (sets explicit dir + injects its own scoped CSS).
+//   - rtl-fix-payload.js  : the EN/HE composer toggle (input direction).
+// Both self-guard against the repeated did-navigate re-injections.
 'use strict';
 
 const { app } = require('electron');
@@ -23,78 +26,44 @@ function dbg(msg) {
 
 dbg('hook loaded');
 
-// unicode-bidi:plaintext is the CSS equivalent of dir="auto": the browser
-// picks LTR or RTL per-element based on the first strong character.
-// For code blocks we force LTR with bidi-override.
-// ol/ul intentionally excluded: dir="auto" is set via JS below, and
-// unicode-bidi:plaintext would conflict with the HTML dir attribute.
-const RTL_CSS =
-  'p,li,blockquote,h1,h2,h3,h4,h5,h6,td,th,' +
-  '[class*="prose"]>*,[data-message-author-role]' +
-  '{unicode-bidi:plaintext!important}' +
-  'pre,code,kbd,samp,var' +
-  '{direction:ltr!important;unicode-bidi:bidi-override!important}';
-
-// Renderer-side input-direction toggle (EN/HE switch in the composer). Lives in
-// rtl-fix-payload.js next to us in the asar; read once at startup and injected
-// into isolated world 999 on every load/navigation (it self-guards against
-// double init). Read failure is non-fatal — the rest of the RTL fix still works.
-const INPUT_DIR_JS = (() => {
+// Renderer scripts injected into isolated world 999. Read once at startup from
+// the asar root next to us. Read failure is non-fatal and logged — a missing
+// read engine still leaves the composer toggle working, and vice versa.
+//
+// rtl-fix-read.js supersedes the old approach of a static insertCSS
+// (unicode-bidi:plaintext) + a dir="auto" list fix: that was first-strong-char
+// detection, which mis-judges Hebrew blocks opening with a Latin token. The
+// engine decides direction by content and injects its own scoped stylesheet.
+function readPayload(name) {
   try {
-    return fs.readFileSync(path.join(__dirname, 'rtl-fix-payload.js'), 'utf8');
+    return fs.readFileSync(path.join(__dirname, name), 'utf8');
   } catch (e) {
-    dbg('payload read FAIL: ' + e.message);
+    dbg(name + ' read FAIL: ' + e.message);
     return '';
   }
-})();
+}
 
-// Sets dir="auto" on list containers (existing and future) so markers
-// follow content direction. Runs in isolated world 999 — shares the DOM
-// but doesn't touch Claude's JS world.
-const LIST_FIX_JS = [
-  '(function(){',
-  '  function fix(el){',
-  '    if(!el.hasAttribute("dir")) el.setAttribute("dir","auto");',
-  '  }',
-  '  document.querySelectorAll("ol,ul").forEach(fix);',
-  '  new MutationObserver(function(ms){',
-  '    ms.forEach(function(m){',
-  '      m.addedNodes.forEach(function(n){',
-  '        if(n.nodeType!==1) return;',
-  '        if(n.matches("ol,ul")) fix(n);',
-  '        n.querySelectorAll&&n.querySelectorAll("ol,ul").forEach(fix);',
-  '      });',
-  '    });',
-  '  }).observe(document.documentElement,{childList:true,subtree:true});',
-  '})();',
-].join('');
+const READ_JS = readPayload('rtl-fix-read.js');     // read-direction engine
+const INPUT_DIR_JS = readPayload('rtl-fix-payload.js'); // composer EN/HE toggle
+
+function runIsolated(wc, label, code) {
+  if (!code) return;
+  try {
+    wc.executeJavaScriptInIsolatedWorld(999, [{ code }]).then(
+      ()  => dbg(label + ' OK id=' + wc.id),
+      (e) => dbg(label + ' FAIL id=' + wc.id + ': ' + e.message)
+    );
+  } catch (e) {
+    dbg(label + ' THROW id=' + wc.id + ': ' + e.message);
+  }
+}
 
 function inject(wc) {
   if (!wc || wc.isDestroyed()) return;
-  Promise.resolve(wc.insertCSS(RTL_CSS)).then(
-    ()  => dbg('insertCSS OK id=' + wc.id),
-    (e) => dbg('insertCSS FAIL id=' + wc.id + ': ' + e.message)
-  );
-  try {
-    wc.executeJavaScriptInIsolatedWorld(999, [{ code: LIST_FIX_JS }])
-      .then(
-        ()  => dbg('isolatedJS OK id=' + wc.id),
-        (e) => dbg('isolatedJS FAIL id=' + wc.id + ': ' + e.message)
-      );
-  } catch (e) {
-    dbg('isolatedJS THROW id=' + wc.id + ': ' + e.message);
-  }
-  if (INPUT_DIR_JS) {
-    try {
-      wc.executeJavaScriptInIsolatedWorld(999, [{ code: INPUT_DIR_JS }])
-        .then(
-          ()  => dbg('inputDirJS OK id=' + wc.id),
-          (e) => dbg('inputDirJS FAIL id=' + wc.id + ': ' + e.message)
-        );
-    } catch (e) {
-      dbg('inputDirJS THROW id=' + wc.id + ': ' + e.message);
-    }
-  }
+  // Read engine first so its mode-change listeners are ready before the
+  // composer toggle (which can dispatch a mode-change on init) runs.
+  runIsolated(wc, 'readJS', READ_JS);
+  runIsolated(wc, 'inputDirJS', INPUT_DIR_JS);
 }
 
 app.on('web-contents-created', (_event, wc) => {

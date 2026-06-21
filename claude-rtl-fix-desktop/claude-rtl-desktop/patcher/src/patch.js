@@ -181,6 +181,7 @@ function findClaude(explicit) {
 const RTL_ENTRY   = 'rtl-fix-entry.js';
 const RTL_HOOK    = 'rtl-fix-hook.js';
 const RTL_PAYLOAD = 'rtl-fix-payload.js';
+const RTL_READ    = 'rtl-fix-read.js';
 // Key stored in package.json that holds the original "main" value. Its
 // presence also serves as the "already patched" marker.
 const ORIG_MAIN_KEY = '__rtlFixOriginalMain';
@@ -201,10 +202,11 @@ function patchUnpackedTree(unpackedDir) {
     ? (pkg[ORIG_MAIN_KEY] || 'index.js')
     : (pkg.main || 'index.js');
 
-  // Write our three payload files to the asar root.
+  // Write our payload files to the asar root.
   fs.writeFileSync(path.join(unpackedDir, RTL_ENTRY),   embedded.RTL_FIX_ENTRY_SOURCE);
   fs.writeFileSync(path.join(unpackedDir, RTL_HOOK),    embedded.RTL_FIX_HOOK_SOURCE);
   fs.writeFileSync(path.join(unpackedDir, RTL_PAYLOAD), embedded.RTL_FIX_PAYLOAD_SOURCE);
+  fs.writeFileSync(path.join(unpackedDir, RTL_READ),    embedded.RTL_FIX_READ_SOURCE);
 
   // Redirect main → our entry shim, and save the original so we can restore.
   // We never touch Claude's own JS files, so its internal integrity checks pass.
@@ -226,7 +228,7 @@ function unpatchUnpackedTree(unpackedDir) {
   fs.writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2));
 
   // Remove our injected files.
-  for (const f of [RTL_ENTRY, RTL_HOOK, RTL_PAYLOAD]) {
+  for (const f of [RTL_ENTRY, RTL_HOOK, RTL_PAYLOAD, RTL_READ]) {
     const p = path.join(unpackedDir, f);
     if (fs.existsSync(p)) fs.unlinkSync(p);
   }
