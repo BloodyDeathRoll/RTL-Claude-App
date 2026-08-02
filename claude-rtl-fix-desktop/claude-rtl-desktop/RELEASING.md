@@ -1,8 +1,9 @@
 # Releasing
 
-End-to-end process for cutting a new release (e.g. `0.1.8` → `0.1.9`). Most of
-the prep is platform-agnostic; the installer artifacts must be built on Windows
-(and, optionally, macOS). Replace `X.Y.Z` with the new version throughout.
+End-to-end process for cutting a new release (e.g. `0.1.9` → `0.1.10`). Every
+step runs on any platform: GitHub Actions builds and publishes the installers on
+its own runners when you push the tag. Replace `X.Y.Z` with the new version
+throughout.
 
 All paths are relative to the working tree root:
 `claude-rtl-fix-desktop/claude-rtl-desktop/`.
@@ -35,56 +36,58 @@ git push origin vX.Y.Z
 `dist/` and `installer/windows/Output/` are gitignored build artifacts — they are
 NOT committed; they're rebuilt per release and uploaded to the GitHub Release.
 
-## 3. Build the installers
+## 3. That's it — CI builds and publishes
 
-### Windows (required) — needs Node 22 + Inno Setup 6
+Pushing the `vX.Y.Z` tag in step 2 is the whole release. `.github/workflows/release.yml`
+runs on any `v*` tag and does everything:
 
-```cmd
-git pull
-cd claude-rtl-fix-desktop\claude-rtl-desktop
-build-all.cmd
+| Job | Runner | What it does |
+| --- | --- | --- |
+| `test-macos` | `macos-latest` | installs Claude via Homebrew, patches, verifies the `__rtlFixOriginalMain` marker, unpatches, verifies removal — the correctness gate |
+| `build-windows` | `windows-latest` | `choco install innosetup`, then `build-all.cmd` → `ClaudeRTLFix-Setup.exe` |
+| `publish-release` | `ubuntu-latest` | creates the GitHub Release with both artifacts attached |
+
+**You do NOT need Node, Inno Setup, or a Windows machine to cut a release.** The
+runner installs its own toolchain. Do not build locally and upload by hand — the
+tag push already produced and published the artifacts.
+
+Watch it:
+
+```sh
+gh run list --limit 3
+gh run watch <run-id> --exit-status
+gh release view vX.Y.Z --json assets --jq '.assets[] | "\(.name)  \(.size) bytes"'
 ```
 
-Produces `installer\windows\Output\ClaudeRTLFix-Setup.exe`.
+Expect ~2 minutes end to end. A published `vX.Y.Z` carries `ClaudeRTLFix-Setup.exe`
+(~23 MB) and `ClaudeRTLFix-macOS.zip` (~30 KB), and the
+[releases page](https://github.com/BloodyDeathRoll/RTL-Claude-App/releases)
+serves the new installer to everyone immediately.
 
-### macOS (optional, experimental)
+If CI is unavailable and you must build by hand, `build-all.cmd` on Windows needs
+Node 22 + Inno Setup 6 at `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` (override
+via the `ISCC` env var), then `gh release upload vX.Y.Z "installer/windows/Output/ClaudeRTLFix-Setup.exe"`.
+This is the fallback, not the process.
 
-The macOS code path (`src/integrity.js`) is untested on real hardware. Only ship
-`ClaudeRTLFix-macOS.zip` if you've actually verified it; otherwise omit it and
-drop the macOS line from the release notes.
+## 4. Verify the shipped build
 
-## 4. Test before publishing
-
-Install the freshly built `.exe` on a clean Windows VM / spare machine and verify
-RTL works on real streamed Hebrew responses (Latin-prefixed paragraphs, numbered
-+ bulleted lists, a table, fenced code) in both EN and HE modes. Confirm
+Install the published `.exe` on a clean Windows VM / spare machine and verify RTL
+works on real streamed Hebrew responses (Latin-prefixed paragraphs, numbered +
+bulleted lists, a table, fenced code) in both EN and HE modes. Confirm
 `document.documentElement.getAttribute('data-claude-rtl-build')` in DevTools
 reports `X.Y.Z`.
 
-For a quick no-repo test of just the payload (no installer rebuild), copy
+For a quick no-repo test of just the payload (no installer at all), copy
 `patcher/dist/patcher.bundled.js` to the test machine and run, in admin
 PowerShell: `node patcher.bundled.js --unpatch` then `node patcher.bundled.js`.
 
-## 5. Publish the GitHub Release
+To test **watcher** behavior specifically, note the watcher runs as SYSTEM and
+admin-as-you is not equivalent. Temporarily repoint the existing task:
 
-A draft can be created up front (notes only, not public). To attach the built
-artifacts and go live:
-
-```sh
-gh release upload vX.Y.Z "installer/windows/Output/ClaudeRTLFix-Setup.exe" \
-  --repo BloodyDeathRoll/RTL-Claude-App
-# (optional) gh release upload vX.Y.Z "ClaudeRTLFix-macOS.zip" --repo BloodyDeathRoll/RTL-Claude-App
-gh release edit vX.Y.Z --draft=false --latest --repo BloodyDeathRoll/RTL-Claude-App
+```powershell
+schtasks /Change /TN "\ClaudeRTLFix\Watcher" /TR "'C:\Program Files\nodejs\node.exe' C:\ProgramData\ClaudeRTLFix\patcher.bundled.js --quiet"
+schtasks /Run /TN "\ClaudeRTLFix\Watcher"
+Start-Sleep 60
+Get-Content C:\ProgramData\ClaudeRTLFix\log.txt -Tail 5
+schtasks /Change /TN "\ClaudeRTLFix\Watcher" /TR "'C:\Program Files\ClaudeRTLFix\claude-rtl-patch.exe' --quiet"
 ```
-
-To create the release from scratch instead (tag must already be pushed):
-
-```sh
-gh release create vX.Y.Z --repo BloodyDeathRoll/RTL-Claude-App \
-  --title "vX.Y.Z — <summary>" --notes "<notes>" \
-  "installer/windows/Output/ClaudeRTLFix-Setup.exe"
-```
-
-Once published as `--latest`, the
-[releases page](https://github.com/BloodyDeathRoll/RTL-Claude-App/releases)
-serves the new installer to everyone.

@@ -81,9 +81,8 @@ Full copy-paste process: see `RELEASING.md` in the working tree root. Summary:
 
 1. Bump version in three places: `patcher/package.json`, `installer/windows/installer.iss` (`MyAppVersion`), and `patcher/src/payload/rtl-fix-read.js` (`BUILD_STAMP`).
 2. `node build.js`, commit, push, then tag `vX.Y.Z` and push the tag.
-3. Run `build-all.cmd` on Windows.
-4. Test on a clean Windows VM (confirm `data-claude-rtl-build` reports the new version in DevTools).
-5. Upload `installer/windows/Output/ClaudeRTLFix-Setup.exe` to the GitHub Release and publish as `--latest`.
+3. **Done — CI takes it from there.** `.github/workflows/release.yml` fires on any `v*` tag: it runs the macOS patch/unpatch correctness gate, installs Inno Setup on a `windows-latest` runner and runs `build-all.cmd`, then publishes the GitHub Release with `ClaudeRTLFix-Setup.exe` + `ClaudeRTLFix-macOS.zip` attached (~2 min). **No local Windows machine, Node, or Inno Setup is needed to cut a release** — never send anyone to build locally. Watch with `gh run watch <id> --exit-status`.
+4. Verify the published build on a clean Windows VM (confirm `data-claude-rtl-build` reports the new version in DevTools).
 
 ## Known constraints
 

@@ -47,7 +47,8 @@
       "Bash(sed -i '3s/\"version\": \"0.1.9\"/\"version\": \"0.1.10\"/' patcher/package.json)",
       "Bash(sed -i '21s/0\\\\.1\\\\.9/0.1.10/' installer/windows/installer.iss)",
       "Bash(sed -i \"32s/'0\\\\.1\\\\.9'/'0.1.10'/\" patcher/src/payload/rtl-fix-read.js)",
-      "Bash(git commit -q -m 'chore\\(release\\): bump version to 0.1.10 *)"
+      "Bash(git commit -q -m 'chore\\(release\\): bump version to 0.1.10 *)",
+      "Bash(git commit -q -m 'docs: releases are built and published by CI, not locally *)"
     ]
   }
 }
