@@ -29,7 +29,7 @@
 
   // Build stamp written to <html data-claude-rtl-build="..."> so the live code
   // version can be confirmed in DevTools. Track the app version; bump on change.
-  var BUILD_STAMP = '0.1.9';
+  var BUILD_STAMP = '0.1.10';
 
   // Shared with the composer toggle (rtl-fix-payload.js): 'en' | 'he'.
   var MODE_KEY = 'claude-rtl-fix-input-dir';
