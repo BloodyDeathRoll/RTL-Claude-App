@@ -26,30 +26,47 @@ const embedded = (() => {
 
 // ----- locate Claude install ----------------------------------------------
 
-function findMsixInstall() {
-  // Anthropic ships Claude as an MSIX package now (publisher hash
-  // pzs8sxrjxfjjc). Ask Windows where it is rather than guessing paths.
+function queryAppxLocations(allUsers) {
   try {
     const out = execFileSync(
       'powershell.exe',
       [
         '-NoProfile', '-NonInteractive', '-Command',
-        '(Get-AppxPackage -Name Claude | ' +
-        'Sort-Object Version -Descending | ' +
-        'Select-Object -First 1).InstallLocation',
+        '(Get-AppxPackage ' + (allUsers ? '-AllUsers ' : '') + '-Name Claude | ' +
+        'Sort-Object Version -Descending).InstallLocation',
       ],
       { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }
-    ).trim();
-    if (out && fs.existsSync(out)) {
-      const resources = path.join(out, 'app', 'resources');
-      if (fs.existsSync(path.join(resources, 'app.asar'))) {
-        return resources;
-      }
-    }
+    );
+    return out.split('\n').map((s) => s.trim()).filter(Boolean);
   } catch (_) {
-    // PowerShell missing / Get-AppxPackage failed / etc.
+    // PowerShell missing / Get-AppxPackage failed / -AllUsers needs admin / etc.
+    return [];
   }
-  return null;
+}
+
+function findMsixInstalls() {
+  // Anthropic ships Claude as an MSIX package now (publisher hash
+  // pzs8sxrjxfjjc). Ask Windows where it is rather than guessing paths.
+  //
+  // -AllUsers is tried FIRST because the watcher task runs as SYSTEM, and a
+  // plain Get-AppxPackage only enumerates packages registered to the calling
+  // user — SYSTEM has none. Without -AllUsers the watcher found nothing and
+  // silently no-op'd on every run, so Claude's auto-updates were never
+  // re-patched. -AllUsers requires admin, so fall back to the user-scoped
+  // query for unelevated dev runs.
+  //
+  // Returns every candidate (newest version first) rather than just the top
+  // one: -AllUsers also lists staged/older versions, whose InstallLocation may
+  // no longer hold an app.asar.
+  const locations = queryAppxLocations(true);
+  const all = locations.length ? locations : queryAppxLocations(false);
+  const out = [];
+  for (const loc of all) {
+    if (!fs.existsSync(loc)) continue;
+    const resources = path.join(loc, 'app', 'resources');
+    if (fs.existsSync(path.join(resources, 'app.asar'))) out.push(resources);
+  }
+  return out;
 }
 
 function defaultClaudePaths() {
@@ -64,8 +81,7 @@ function defaultClaudePaths() {
   if (platform === 'win32') {
     const out = [];
     // Try MSIX first (current Anthropic distribution).
-    const msix = findMsixInstall();
-    if (msix) out.push(msix);
+    out.push(...findMsixInstalls());
     // Legacy Squirrel layout.
     const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
     const root = path.join(localAppData, 'AnthropicClaude');
@@ -330,7 +346,10 @@ async function main() {
     target = findClaude(explicit);
   } catch (e) {
     if (quiet) {
-      // Watcher mode: Claude may not be installed, that's fine.
+      // Watcher mode: Claude may not be installed, that's fine. Log it anyway —
+      // a silent return here is indistinguishable from a healthy no-op run, and
+      // that ambiguity hid a watcher that never found Claude at all.
+      log(quiet, '[claude-rtl-fix] no Claude install found; nothing to do.');
       return;
     }
     throw e;
